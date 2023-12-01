@@ -1,0 +1,58 @@
+1 基于VisualStudio的FreeRtos概述
+1.1	FreeRtos目录结构
+FreeRtos目录包含三个部分，一个是Demo文件，内部包含了一些工程文件。一个是Source文件，内部包含了FreeRtos的核心文件，这些文件是通用的。还有一部分是生态文件。
+ 
+图表 1 FreeRtos目录
+1.2	核心文件
+FreeRtos的核心文件中有两个文件非常重要，他们是tasks.c和list.c，这两个文件用来创建任务和进行链表操作。除此之外还有queue.c用于提供队列、信号量操作。timers用于提供软件计时器，event_group提供时间组功能。
+ 
+图表 2 核心文件
+
+ 
+图表 3 核心文件的作用
+1.3	移植时涉及的文件
+移植涉及的文件放在portbale文件中。移植入WIN32平台时内部包含MemMang文件和MSVC-MingW文件，MemMang负责实现内存管理，MSVC-MingW负责实现软件到硬件的链接。
+ 
+图表 4 portable文件示意图
+ 
+图表 5 移植所需的文件
+1.4头文件
+1.4.1 头文件目录
+FreeRtos需要三类头文件，一类是通用函数的头文件source/include，是list.c、tasks.c等源文件的头文件，第二类是移植时用到的头文件，在portable目录下，比如portmacro.h文件，用于定义宏。第三类是FreeRtos功能配置头文件FreeRTOSConfig.h。
+ 
+图表 6 头文件
+1.4.2 头文件包含
+使用FreeRtos的API函数时必须先包含FreeRTOS.h，包含了这个文件后再去包含task.h,queue.h等头文件。FreeRTOS.h是内核中的配置文件，它包含了绝大多数FreeRtos的配置选项。FreeRTOSConfig.h只是用户级别的配置文件，这两个有所区别。用户不直接修改内核中的宏定义，而是通过FreeRTOSConfig.h去修改FreeRTOS.h中的宏定义。
+
+1.5内存管理
+heap文件用于实现内存管理，它放在portbale目录下。一般都使用heap.c函数。
+
+ 
+图表 7 内存管理函数
+1.6 Demo文件夹
+Demo目录下是预先配置好的、没有编译错误的工程。目的是基于它进行修改，以适配不同的平台。
+Demo中的common文件夹可以删除，main函数中要保留prvSetupHardware()，vTaskStartScheduler()。第一个是创建平台，第二个是启动任务调度器。
+
+1.7 数据类型和编程规范
+1.7.1 数据类型
+每个移植的版本都含有自己的portmacro.h头文件，里面定义了两个数据类型。
+TickType_t：
+FreeRTOS配置了一个周期性的时钟中断：Tick Interrupt
+每发生一次tick中断都会对这个中断次数进行累加，这就称为tick count。
+tick count这个变量的类型是TickType_t，它可以是16位也可以是32位，通过configure头文件定义。
+BaseType_t:
+BaseType_t是根据架构定义的数据类型，对于32位架构他就是uint32_t，16位架构就是uint16_t,8位架构就是uint8_t。BaseType_t通常作为返回值的类型和逻辑值。
+
+1.7.2 变量名
+FreeRtos的编程风格在变量名上会体现出变量的数据类型，比如pxTCB他的前缀是px，p代表指针，x代表BaseType_t。
+ 
+图表 8 变量名
+1.7.3 函数名
+函数名的前缀有两个部分，一个是返回值类型(小写)，另一个是在哪个文件中定义(大写)
+比如xTaskResumeAll，x代表返回值是BaseType_t,Task代表在tasks.c文件中定义。
+ 
+图表 9 函数名
+1.7.4 宏的名
+宏一般分为小写前缀和大写标识，前缀是在哪个文件中定义的。比如tskSTACK_FILL_BYTE，tsk代表在task.h文件中定义的，后面大写的部分是宏的功能标识。
+ 
+图表 10 宏的名字
