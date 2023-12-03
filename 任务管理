@@ -1,0 +1,348 @@
+3 任务管理
+3.1 基本概念
+任务状态：ready，blocked，suspened
+优先级：priority
+栈：stack用来运行和保存现场，每个任务都有自己的栈
+3.2 任务的创建与删除
+3.2.1 什么是任务
+在FreeRtos中，任务就是一个函数(ATaskFunction)，这个函数没有返回值，多个任务可以运行同一个函数。
+在函数内部尽量使用局部变量，由于每个任务都有自己的栈，多个任务运行这个函数时他们的局部变量会放在自己的栈里，如果采用全局变量可能会引起冲突。
+ 
+图表 22 任务函数及其实例
+3.2.2 创建任务
+创建任务时的函数如下：
+BaseType_t xTaskCreate(TaskFunction pxTaskCode,//任务函数，参数类型是函数指针
+		const char* const pcName,//任务名，这是个字符串
+		const configSTACK_DEPTH_TYPE usStackDepth,//栈的大小，单位为字，一个字四个字节
+		void* const pvParameters,//调用任务函数时的传参
+		UBaseType_t uxPriority,//优先级
+		TaskHandle_t* const pxCreatedTask);//任务句柄，通过句柄可以操作这个函数
+ 
+图表 23 任务参数
+3.2.3 创建任务举例
+
+xTaskCreate((TaskFunction_t)task1,”task1”,1000,NULL,1,NULL);//创建了一个任务，任务函数是task1，任务名是task1，分配的栈大小是1000，传入参数是NULL，优先级是1，不使用任务句柄。
+xTaskCreate((TaskFunction_t)task2,”task2”,1000,NULL,1,NULL);//创建了一个任务，任务函数是task2，任务名是task2，分配的栈大小是1000，传入参数是NULL，优先级是1，不使用任务句柄。
+vTaskStartScheduler();//开启调度器
+
+void task1(void* pvParameters)//任务函数无返回值
+{
+const char[10]=”Task1 run”;
+for(;;)//任务函数内部是无限循环的，除非删除自己否则不会退出
+	{
+	printf(“%s\n”,char);
+	for(int i;i<100;i++);//延时一段时间
+	}
+}
+
+void task2(void* pvParameters)//任务函数无返回值
+{
+const char[10]=”Task2 run”;//虽然和task1中的变量名相同，但是这保存在task2的栈中
+for(;;)//任务函数内部是无限循环的，除非删除自己否则不会退出
+	{
+	printf(“%s\n”,char);
+	for(int i;i<100;i++);//延时一段时间
+	}
+}
+任务2创建完毕后开启调度器，这个时候调度器会开始控制任务的执行状态。由于任务2后创建，在就绪链表中链表上的指针会指向任务2，所以任务2会先运行，运行一段时间后定时器触发tick中断，由于任务1和任务2的优先级相同，接下来会轮到任务1运行。
+ 
+图表 24 任务切换时间点
+3.2.4 创建任务后使用任务参数
+#define mainDELAY_LOOP_COUNT		( 0xffffff )
+
+
+void vTask(void* pvParameters);//任务函数声明
+static const char* pcTextForTask1 = "T1 run\r\n";//字符串指针
+static const char* pcTextForTask2 = "T2 run\r\n";//字符串指针
+
+int main( void )
+{
+
+	xTaskCreate( vTask, "Task 1", 1000, pcTextForTask1, 1, NULL );	
+	xTaskCreate( vTask, "Task 2", 1000, pcTextForTask2, 1, NULL );//采用同一个任务函数，但是传入的参数不一样，在运行的过程中他们也会保存在不同的栈中
+
+	vTaskStartScheduler();	
+	for( ;; );
+	return 0;
+}
+/*-----------------------------------------------------------*/
+
+void vTask( void *pvParameters )
+{
+	const char* pcTaskName = (char*)pvParameters;
+	volatile uint32_t ul;
+	for( ;; )
+	{
+		printf("%s", pcTaskName);
+		for (ul = 0; ul < mainDELAY_LOOP_COUNT; ul++);
+	}
+}
+3.2.5 任务的删除
+任务函数的退出只能是删除任务。
+在任务函数运行的过程中，函数内部都是死循环，如果不是死循环，那么这个函数会运行结束，运行结束后会返回到连接寄存器LR所指向的位置，在创建任务的过程中，FreeRtos会向LR寄存器中放入任务错误函数的地址，那么一个函数运行结束会直接进入任务错误函数，在这个错误函数中系统会关闭中断同时进入死循环，结果就是系统死机。
+
+所以任务函数一定要是死循环，退出函数的唯一方法就是vTaskDelete
+ 
+图表 25 任务错误函数
+自杀：vTaskDelete(NULL);
+被杀：别的任务执行vTaskDelete(pvTaskCode),pvTaskCode是自己的句柄
+杀人：执行vTaskDelete(pvTaskCode),pvTaskCode是别的任务的句柄
+ 
+图表 26 函数原型
+xTaskToDelete是要删除的任务的句柄，可以是NULL，如果传入NULL表示删除自己。
+3.2.6 删除任务举例
+TaskHandle_t* Task2_Handle;
+int main( void )
+{
+
+	xTaskCreate( vTask1, "Task 1", 1000, NULL, 1, NULL );	//创建任务1	
+
+
+	vTaskStartScheduler();	
+	for( ;; );
+	return 0;
+}
+/*-----------------------------------------------------------*/
+
+void vTask1( void *pvParameters )
+{
+	const char* pcTaskName = (char*)pvParameters;
+	volatile uint32_t ul;
+	BaseType_t ret;
+	for( ;; )
+	{
+		printf("%s", "Task1 is running\n");
+		ret=xTaskCreate(vTask2, "Task 2", 1000, NULL, 1, Task2_Handle);//在任务一中创建任务2，任务2优先级是2，创建完后会立即运行
+
+		if (ret != pdPASS)
+		{
+			printf("Create Task2 Failed\n");
+		}
+		
+		vTaskDelay(20);//这个延时是为了让空闲任务清理现场，因为任务2删除了自己，它之前运行所占据的空间还没释放，需要空闲任务中的钩子函数去清理现场，避免一直创建任务而造成内存不足
+	}
+}
+///*-----------------------------------------------------------*/
+
+void vTask2( void *pvParameters )//运行任务2后，任务二执行打印语句然后删除自己
+{
+	printf("Task2 is running\n");
+	vTaskDelete(NULL);
+}
+3.3 任务优先级和Tick
+3.3.1 任务优先级
+优先级决定了任务运行的顺序，优先级高的任务先运行。优先级的取值范围是0-(configMAX_PRIORITIES-1)，数值越大优先级越高。
+在FreeRtos的调度过程中，FreeRtos会先确保最高优先级、可运行的任务马上就能执行，对于相同优先级、可运行的任务，轮流执行(不需要主动放弃CPU资源)。
+void vTask1(void* pvParameters);
+void vTask2(void* pvParameters);
+static const char* pcTextForTask1 = "T1 run\r\n";
+static const char* pcTextForTask2 = "T2 run\r\n";
+
+TaskHandle_t* Task2_Handle;
+int main( void )
+{
+
+	xTaskCreate( vTask1, "Task 1", 1000, pcTextForTask1, 2, NULL );//相同优先级
+	xTaskCreate( vTask2, "Task 2", 1000, pcTextForTask2, 2, NULL); //相同优先级
+
+	vTaskStartScheduler();	
+	for( ;; );
+	return 0;
+}
+/*-----------------------------------------------------------*/
+
+void vTask1( void *pvParameters )
+{
+	const char* pcTaskName = (char*)pvParameters;
+
+	for( ;; )
+	{
+		printf("%s", pcTaskName);
+		vTaskDelay(1);//主动放弃CPU资源
+	}
+}
+///*-----------------------------------------------------------*/
+
+void vTask2(void* pvParameters)
+{
+	const char* pcTaskName = (char*)pvParameters;
+
+	for ( ;; )
+	{
+		printf("%s", pcTaskName);
+		vTaskDelay(1);//主动放弃CPU资源
+	}
+}
+3.3.2 Tick
+Tick是定时器产生的中断，两次中断之间的时间称为时间片，时间片的长度由configTICK_RATE_HZ决定，时间片长度是他的倒数，也可以使用pdMS_TO_TICKS（）将数值转换为毫秒。但是tick中断并不精确。
+ 
+图表 27 Tick中断时间
+3.3.3 优先级实验
+void vTask1(void* pvParameters);
+void vTask2(void* pvParameters);
+static const char* pcTextForTask1 = "T1 run\r\n";
+static const char* pcTextForTask2 = "T2 run\r\n";
+
+TaskHandle_t* Task2_Handle;
+int main( void )
+{
+
+	xTaskCreate( vTask1, "Task 1", 1000, pcTextForTask1, 2, NULL );//相同优先级
+	xTaskCreate( vTask2, "Task 2", 1000, pcTextForTask2, 2, NULL); //相同优先级
+
+	vTaskStartScheduler();	
+	for( ;; );
+	return 0;
+}
+/*-----------------------------------------------------------*/
+
+void vTask1( void *pvParameters )
+{
+	const char* pcTaskName = (char*)pvParameters;
+
+	for( ;; )
+	{
+		printf("%s", pcTaskName);
+		for (int i = 0; i < 10000000; i++);//没有放弃CPU资源，他还在执行，除非调度器调用其他任务
+	}
+}
+///*-----------------------------------------------------------*/
+
+void vTask2(void* pvParameters)
+{
+	const char* pcTaskName = (char*)pvParameters;
+
+	for ( ;; )
+	{
+		printf("%s", pcTaskName);
+		for (int i = 0; i < 10000000; i++);//没有放弃CPU资源，他还在执行，除非调度器调用其他任务
+	}
+}
+ 
+图表 28 时间片流转
+3.3.4 修改优先级
+FreeRtos可以使用uxTaskPriorityGet来获取任务优先级，也可以使用vTaskPrioritySet来设置任务优先级。
+ 
+图表 29 获取优先级
+uxTaskPriority获取优先级时，如果参数为NULL，代表获取自己的优先级。
+ 
+图表 30 设置优先级
+vTaskPrioritySet用来设置任务的优先级，使用参数xTask来指定任务，如果使用NULL标识设置自己的优先级；参数uxNewPriority表示新的优先级。
+
+代码如下:
+void vTask1(void* pvParameters);
+void vTask2(void* pvParameters);
+static const char* pcTextForTask1 = "T1 run\r\n";
+static const char* pcTextForTask2 = "T2 run\r\n";
+
+TaskHandle_t Task2_Handle;// TaskHandle_t是void*，所以这里定义的是指针变量
+int main( void )
+{
+
+	xTaskCreate( vTask1, "Task 1", 1000, pcTextForTask1, 2, NULL );
+	xTaskCreate( vTask2, "Task 2", 1000, pcTextForTask2, 1, &Task2_Handle);//将句柄放入指针变量指向的空间内
+
+	vTaskStartScheduler();	
+	for( ;; );
+	return 0;
+}
+/*-----------------------------------------------------------*/
+
+void vTask1( void *pvParameters )
+{
+	const char* pcTaskName = (char*)pvParameters;
+	UBaseType_t uxpriority;
+	uxpriority = uxTaskPriorityGet(NULL);//获取自己的优先级
+	for( ;; )
+	{
+		printf("%s", pcTaskName);
+		vTaskPrioritySet(Task2_Handle, (uxpriority + 1));//将任务2的优先级提高到比自己的优先级高1这样任务2会立即运行
+		//vTaskDelay(1);
+	}
+}
+///*-----------------------------------------------------------*/
+
+void vTask2(void* pvParameters)
+{
+	const char* pcTaskName = (char*)pvParameters;
+	UBaseType_t uxpriority;
+	uxpriority = uxTaskPriorityGet(NULL);//获取自己的优先级
+	for ( ;; )
+	{
+		printf("%s", pcTaskName);
+		vTaskPrioritySet(NULL, (uxpriority -2));//将任务2的优先级减小到比任务1的优先级低，这样任务1会立即运行
+	}
+}
+ 
+图表 31 优先级变换
+3.4 任务状态
+任务状态分为运行态，阻塞态，暂停态，就绪态
+3.4.1 阻塞态Blocked
+阻塞态可以视为等待，在实际产品中一个任务不会一直运行，而是以事件驱动的方法让他运行，这个时候任务要等待某个事件，事件发生后他才能运行，在等待事件的过程中他不消耗CPU资源，这个时候他就处于阻塞态。
+
+在阻塞状态的任务它可以等待两种类型的数据
+一种是时间相关事件：任务可以等待一段时间比如等待2分钟，也可以一直等待直到某个时间点，比如等待到下午三点。
+
+另一种是同步事件：这些事件由别的任务或者中断程序产生，比如任务A等待任务B给他发送数据，或者任务A等待用户按下按键。同步事件的来源有很多，比如队列、二值信号量、互斥量等
+
+3.4.2 暂停状态Suspend
+暂停状态用的不多。
+在FreeRtos中，任务进入暂停状态的唯一方法是通过vTaskSuspend函数
+ 
+图表 32 函数原型
+参数xTaskToSuspend表示要暂停的任务，如果为NULL表示暂停自己，如果要退出暂停状态只能由别人来操作，在其他函数或者中断中调用vTaskResume。
+
+3.4.3 就绪状态Ready
+任务准备好了，随时可以运行，但是还没轮到它，这个时候就处于就绪态。
+3.4.4 任务状态之间的转换
+ 
+图表 33 任务状态的切换
+3.5 Delay函数
+3.5.1 两个Delay函数
+vTaskDelay:至少等待指定个数的Tick Interrupt才能变为就绪状态
+vTaskDelayUntil：等待到指定的绝对时刻，才能变为就绪态
+ 
+图表 34 函数原型
+
+3.6 空闲任务及其钩子函数
+3.6.1空闲任务及其钩子函数的作用
+在任务函数运行的过程中，函数内部都是死循环，如果不是死循环，那么这个函数会运行结束，运行结束后会返回到连接寄存器LR所指向的位置，在创建任务的过程中，FreeRtos会向LR寄存器中放入任务错误函数的地址，那么一个函数运行结束会直接进入任务错误函数，在这个错误函数中系统会关闭中断同时进入死循环，结果就是系统死机。
+
+所以任务函数一定要是死循环，退出函数的唯一方法就是vTaskDelete
+空闲任务可以释放被删除的任务的内存，它的优先级为0，并且要么处于运行态要么处于就绪态，永远不会阻塞，要注意的是如果使用vTaskDelete来删除任务，那么就要确保空闲任务有机会执行，否则无法释放被删除的任务的内存。
+一个良好的程序中，他的任务都是事件驱动的：平时大部分时间处于阻塞状态，在所有用户任务都无法执行时调度器必须找到一个可以运行的任务：所以我们要提供空闲任务。
+
+在空闲任务在还可以添加一个空闲任务的钩子函数，空闲任务的循环每执行一次就会调用一次钩子函数啊，钩子函数会执行一些低优先级的、后台的、需要连续执行的函数，此外通过计算空闲任务在程序运行中所占据的时间可以算出处理器的占用率。空闲任务还可以让系统进入省电状态。
+3.6.2 使用钩子函数的前提
+使用钩子函数时要将configUSE_IDLE_HOOK定义为1，然后自定义vApplicationIdleHook函数的内容。
+ 
+图表 35 使用钩子函数的前提
+3.7 调度算法
+3.7.1 调度算法的概念
+在单处理系统中，任何时间只能有一个任务处于运行状态，调度器永远只是挑选最高优先级的就绪任务让他进入运行状态
+3.7.2 配置调度算法
+所谓调度算法就是确定哪个就绪态的任务可以切换为运行状态。
+通过配置文件FreeRTOSConfig.h的两个配置项来配置调度算法：configUSE_PREEMPTION、configUSE_TIME_SLICING，除此之外还有configUSE_TICKLESS_IDLE，他是一个高级选项，用于关闭Tick中断来实现省电。
+调度算法的行为主要体现在两个方面：高优先级的任务先运行、同优先级的就绪态任务如何被选中。调度算法要确保同优先级的就绪态任务能”轮流”运行，策略是“轮转调度“(Round Robin Scheduling)。轮转调度并不保证人物的运行时间是公平分配的，我们还可以细化时间的分配方法。
+
+从3个角度统一理解多种调度算法：
+A.	可否抢占？高优先级的任务能否优先执行(配置项: configUSE_PREEMPTION)
+	可以：被称作"可抢占调度"(Pre-emptive)，高优先级的就绪任务马上执行，下面再细化。
+	不可以：不能抢就只能协商了，被称作"合作调度模式"(Co-operative Scheduling)
+当前任务执行时，更高优先级的任务就绪了也不能马上运行，只能等待当前任务主动让出CPU资源。
+其他同优先级的任务也只能等待：更高优先级的任务都不能抢占，平级的更应该老实点
+
+B.	可抢占的前提下，同优先级的任务是否轮流执行(配置项：configUSE_TIME_SLICING)
+	轮流执行：被称为"时间片轮转"(Time Slicing)，同优先级的任务轮流执行，你执行一个时间片、我再执行一个时间片
+	不轮流执行：英文为"without Time Slicing"，当前任务会一直执行，直到主动放弃、或者被高优先级任务抢占
+
+C.	在"可抢占"+"时间片轮转"的前提下，进一步细化：空闲任务是否让步于用户任务(配置项：configIDLE_SHOULD_YIELD)
+	空闲任务低人一等，每执行一次循环，就看看是否主动让位给用户任务
+	空闲任务跟用户任务一样，大家轮流执行，没有谁更特殊
+ 
+图表 36 常用调度算法
+A：可抢占+时间片轮转+空闲任务让步，最常用
+B：可抢占+时间片轮转+空闲任务不让步，很少用
+C：可抢占+非时间片轮转+空闲任务让步，很少用
+D：可抢占+非时间片轮转+空闲任务不让步，很少用
+E：合作调度，几乎不用
