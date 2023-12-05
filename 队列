@@ -1,0 +1,466 @@
+5 队列
+5.1 队列的特性
+5.1.1 常规操作
+队列可以包含若干个数据，他的个数称为长度，队列中每个数大小固定，创建队列时要指定长度和数据大小。数据操作方法是FIFO，也可以强制写队列头部，覆盖头部数据。
+
+队列中数据储存的方式是将任务中的参数拷贝进队列不会影响原数据除非使用地址传输，当拷贝的数值被读取出去后就会被删除。
+5.1.2 传输数据的两种方法
+拷贝：把数据、变量的值复制进队列里，这里拷贝的是值不是变量名，所以有一个取地址操作，目的是拿到变量名对应的值
+引用：把数据、变量的地址复制进队列里
+
+FreeRtos使用拷贝值的方法：
+	局部变量的值可以发送到队列中，即使函数退出、局部变量被回收也不会影响队列中的数据。
+	无需分配buff来保存数据，队列中有buff
+	局部变量可以马上再次使用
+	发送任务、接受任务解耦：接受任务不需要知道这数据是谁的、也不需要发送任务来释放数据
+	如果数据是在太大可以使用队列传输地址
+	队列的空间由FreeRtos内核分配，不需要任务分配
+	如果使用地址传输要求双方任务都能对地址进行访问
+5.1.3 队列的阻塞访问
+只要知道队列的句柄就可以读写队列。
+任务读写队列时如果读写不成功就会阻塞，在这期间如果可以读写了就会进入就绪态，否则阻塞到超时。
+某个任务读队列时，如果队列没有数据，则该任务可以进入阻塞状态：还可以指定阻塞时间，如果队列有数据了，则该阻塞的任务会变为就绪态。如果一直没有数据，则时间到了之后也会进入就绪态。
+既然读取队列的任务个数没有限制，那么当多个任务读取空队列时，这些任务都会进入阻塞状态，有多个任务在等待同一个队列的数据。当队列中有数据时哪个任务会进入就绪态？
+	优先级最高的任务
+	如果优先级相同，那等待时间最久的任务会进入就绪态
+跟读队列相似，一个任务要写队列时，如果队列满了，该任务也可以进入阻塞状态：还可以指定阻塞的时间。如果队列有空间了，则该阻塞的任务会变为就绪态。如果一直没有空间，则时间到了之后他也会进入就绪态。
+既然写队列的任务个数没有限制，那么当多个任务写“满队列“时，这些任务都会进入阻塞状态：有多个任务在等待同一个队列的空间。当队列中有空间时，哪个任务会进入就绪态？
+	优先级最高的任务
+	如果大家优先级相同，那等待时间最久的任务会进入就绪态
+5.2 队列函数
+5.2.1 创建
+队列的创建有两种方法：动态内存分配、静态内存分配
+动态内存分配：xQueueCreate，队列的内存在函数内部动态分配
+ 
+图表 39 函数原型
+uxQueueLength是队列长度，最多能存放多少个结点数据(item)
+uxltemSize是每个数据(item)的大小，以字节为单位
+返回值：非0表示成功，可以用这个非0句柄来操作队列；NULL表示失败，内存不足
+
+静态分配内存：xQueueCreateStatic，队列的内存要事前分配好
+QueueHandle_t xQueueCreateStatic(
+UBaseType_t uxQueueLength,
+UBaseType_t uxItemSize,
+uint8_t *pucQueueStorageBuffer,
+StaticQueue_t *pxQueueBuffer);
+
+uxQueueLength是队列长度，最多能存放多少个数据(item)，uxItemSize是每个数据(item)的大小，以字节为单位。pucQueueStorageBuffer是一个uint8_t数组，数组大小至少为uxQueueLength*sizeof(item)，*pxQueueBuffer是StaticQueue结构体，用来保存队列的数据结构。
+
+5.2.2 复位
+队列刚被创建时里面没有数据，可以调用xQueueReset()把队列恢复为初始状态
+ 
+图表 40 函数原型
+5.2.3 删除
+删除队列的函数为xQueueDelete(),只能删除使用动态方法创建的队列，他会释放内存
+
+ 
+图表 41 函数原型
+5.2.4 写队列
+可以将数据写在队列头部，也可以将数据写在队列尾部，写队列有两种形式，一种是在任务中使用的函数，一种是在ISR中使用的函数。
+
+//向队列中写入数据(默认方式，从尾部写入)
+BaseType_t xQueueSend( QueueHandle_t xQueue,//队列句柄，决定写入哪个队列
+						const void* 	pvItemToQueue,//数据指针，数据的值会被复制进队列
+						TickType_t	xTickToWait);//预定义阻塞时间，如果被设为portMAX_DELAY，则会一直阻塞直到有空间可写
+
+//从尾部向队列中写入数据
+BaseType_t xQueueSendToback(
+							QueueHandle_t 	xQueue,
+							const void  *		pvItemToQueue,
+							TickType_t		xTicksToWait);
+
+//从头部向队列中写入数据
+BaseType_t xQueueSendToFront(
+							QueueHandle_t 	xQueue,
+							const void*		pvItemToQueue,
+							TickType_t		xTicksToWait);
+
+//在中断函数中向队列尾部写入数据
+BaseType_t xQueueSendToBackFromISR(
+									QueueHandle_t 	xQueue,//队列句柄，决定写入哪个队列
+									const void*		pvItemToQueue,//指向要发送的消息，发送的时候会将这个消息拷贝到队列中
+									BaseType_t*		pxHigherPriorityTaskWoken);//标记退出此函数以后是否进行任务切换，这个变量的值由这个函数提供，用户只需要用一个变量来接收就行，当这个值为pdTURE时，在退出中断服务函数之前一定要进行一次任务切换。
+中断形式的写队列函数不会有阻塞时间，但是可能会进行任务切换
+
+//在中断函数中向队列头部写入数据
+BaseType_t xQueueSendToFrontFromISR(
+									QueueHandle_t xQueue,
+									const void* pvItemToQueue,
+									BaseType_t* pxHigherPriorityTaskWoken);
+
+5.2.5 读队列
+使用xQueueReceive()函数读队列，读到一个数据后，队列中该数据会被移除。
+BaseType_t xQueueReceive(
+						QueueHandle_t 	xQueue,//队列句柄，指定要读哪个队列
+						void*const		pvBuffer,//buffer指针，队列的数据会被复制到这个buffer
+						TickType_t		xTicksToWait);//如果队列为空则无法读出数据，可以让任务进入阻塞状态，xTicksToWait表示阻塞的最大时间(Tick Count)。如果被设置为0，则无法读出数据时函数会立刻返回；如果被设置为portMAX_DELAY则会一直阻塞到有数据可写。
+
+5.2.6 查询
+可以查询队列中由多少个数据、有多少个空余空间。
+ 
+图表 42 函数原型
+5.2.7 覆盖/偷看
+当队列长度为1时，可以使用xQueueOverwrite()或xQueueOverwriteFromISR()来覆盖数据，要求队列长度必须为1。当队列满时，这些函数会覆盖里面的数据，这也意味着这些函数不会被阻塞，覆盖操作一定会将数据写入队列，不管有没有值。
+ 
+图表 43 函数原型
+
+BaseType_t xQueueOverwrite(
+                           QueueHandle_t xQueue,//覆盖的队列，长度为1
+                           const void * pvItemToQueue//要拷贝进队列的值的地址
+                      );
+
+BaseType_t xQueueOverwriteFromISR(
+                           QueueHandle_t xQueue, //覆盖的队列，长度为1
+                           const void * pvItemToQueue, //要拷贝进队列的值的地址
+                           BaseType_t *pxHigherPriorityTaskWoken//函数给出的值，标明是否进行任务切换
+                      );
+
+如果想让队列中的数据提供多方读取，也就是读取时不移除数据，要留给后来人，那么可以使用“窥视“，也就是xQueuePeek(),xQueuePeekFromISR()。这些函数都会从队列中复制出数据，但是不会移除数据。这意味着，如果队列中没有数据，那么偷看时会导致阻塞，一旦队列中有数据，以后每次偷看都会成功。
+
+窥视不会删除队列中的数据，但会被阻塞
+ 
+图表 44 函数原型
+BaseType_t xQueuePeek(
+                          QueueHandle_t xQueue,//窥视的队列
+                          void * const pvBuffer,//窥视得到的数据
+                          TickType_t xTicksToWait//窥视不到数据被阻塞的时间
+                      );
+
+BaseType_t xQueuePeekFromISR(
+                                 QueueHandle_t xQueue,//窥视的队列
+                                 void *pvBuffer,//窥视得到的数据
+                             );
+
+5.3 队列的基本使用
+
+QueueHandle_t xQueue;//定义队列句柄，将生成的队列句柄存放在xQueue中
+void vSenderTask(void* pvParameter);
+void vReceiveTask(void* pvParameter);
+int main( void )
+{
+	//队列在main函数中创建
+	xQueue = xQueueCreate(5,sizeof(int32_t));//创建一个队列，存放五个数，每个数大小为sizeof(int32_t)
+
+	if (xQueue != NULL)
+	{
+		xQueueReset(xQueue);//对队列进行复位
+		xTaskCreate((TaskFunction_t)vSenderTask	,//创建一个发送任务，任务函数为vSenderTask
+									"Sender1"	,
+									1000		,
+									(void*)100	,//传入的参数为100，参数形式为void*
+									1			,
+									NULL);
+		xTaskCreate((TaskFunction_t)vSenderTask	, //创建一个发送任务，任务函数为vSenderTask
+
+									"Sender2"	,
+									1000		,		
+									(void*)200	, //传入的参数为200，参数形式为void*
+
+									1			,
+									NULL);
+		//创建一个接收队列的任务，他的优先级为2，一旦队列中有数据可读就运行，没数据可读就会阻塞
+		xTaskCreate((TaskFunction_t)vReceiveTask,//接受任务函数为vReceiveTask
+									"Receiver"	,
+									1000		,
+									NULL		,
+									2			,
+									NULL);
+	}
+	vTaskStartScheduler();	
+	for( ;; );
+	return 0;
+}
+/*-----------------------------------------------------------*/
+
+void vSenderTask(void* pvParameter)
+{
+	int32_t IvalueToSend;
+	BaseType_t	xStatus;
+	IvalueToSend = (int32_t)pvParameter;
+	while (1)
+	{	//从尾部写队列，写入xQueue队列，写入的值的指针为&IvalueToSend，阻塞时间为0
+		xStatus = xQueueSendToBack(xQueue, &IvalueToSend, 0);
+		if (xStatus != pdPASS)
+		{
+			printf("cannot write Queue\n");
+		}
+	}
+}
+void vReceiveTask(void* pvParameter)
+{
+	int32_t IvalueToReceive;
+	BaseType_t	xStatus;
+	while (1)
+	{	//从头部读取队列，读取xQueue队列，读取的值的指针为&IvalueToReceive，阻塞时间为2
+		xStatus = xQueueReceive(xQueue, &IvalueToReceive, 100);//类似于scanf函数
+		if (xStatus != pdPASS)
+		{
+			printf("cannot Read Queue\n");
+		}
+		else
+		{
+			printf("read number is %d \n", IvalueToReceive);
+		}
+	}
+}
+ 
+图表 45 运行结果
+ 
+图表 46 任务调度情况
+5.4  分辨数据源
+多个发送任务使用同一个队列时，接收任务需要分辨出数据源，这时可以将数据和数据源打包成一个结构体放入队列中。
+
+#include "FreeRTOS.h"
+#include "task.h"
+#include "queue.h"
+
+#define mainDELAY_LOOP_COUNT		( 0xffffff )
+
+
+QueueHandle_t xQueue;
+void vSenderTask(void* pvParameter);
+void vReceiveTask(void* pvParameter);
+
+enum data_ID_t//定义两个枚举常量，如果定义这个类型的枚举变量那它的取值只能是这两个值
+{
+	eMotorSpeed,
+	eSpeedSetPoint
+};
+typedef enum data_ID_t ID_t;
+
+struct data
+{
+	ID_t eDataID;
+	int32_t LDataValue;
+};
+typedef struct data Data_t;
+const Data_t xStructsToSend[2] = { {eMotorSpeed,10},{eSpeedSetPoint,5} };
+
+int main( void )
+{
+
+	xQueue = xQueueCreate(5,sizeof(Data_t));
+
+	if (xQueue != NULL)
+	{
+		xQueueReset(xQueue);
+		xTaskCreate((TaskFunction_t)vSenderTask	,
+									"Sender1"	,
+									1000		,
+									(void*)&xStructsToSend[0],
+									2			,
+									NULL);
+		xTaskCreate((TaskFunction_t)vSenderTask	,
+									"Sender2"	,
+									1000		,		
+									(void*)&xStructsToSend[1],
+									2			,
+									NULL);
+		//创建一个接收队列的任务，他的优先级为1，一旦队列中有数据可读就运行，没数据可读就会阻塞
+		xTaskCreate((TaskFunction_t)vReceiveTask,
+									"Receiver"	,
+									1000		,
+									NULL		,
+									1			,
+									NULL);
+	}
+	vTaskStartScheduler();	
+	for( ;; );
+	return 0;
+}
+/*-----------------------------------------------------------*/
+
+void vSenderTask(void* pvParameter)
+{
+	int32_t IvalueToSend;
+	BaseType_t	xStatus;
+	while (1)
+	{	//从尾部写队列，写入xQueue队列，写入的值的指针为pvParameter，阻塞时间为100（没有空间时会阻塞），任务一和任务二会轮流运行，等到无法写入数据时被阻塞，这个时候就轮到接收任务运行了
+		xStatus = xQueueSendToBack(xQueue, pvParameter, 100);
+		if (xStatus != pdPASS)
+		{
+			printf("cannot write Queue\n");
+		}
+	}
+}
+void vReceiveTask(void* pvParameter)
+{
+	Data_t xReceiverStructure;
+	BaseType_t	xStatus;
+	while (1)
+	{	//从头部读取队列，读取xQueue队列，读取的值的指针为&xReceiverStructure，不阻塞.接收任务读取一个数据后队列会出现一个空位，这个时候又轮到高优先级任务运行，程序会在这两个任务当作找到等待时间更久的任务进行写队列操作。
+		xStatus = xQueueReceive(xQueue, &xReceiverStructure, 0);
+		if (xStatus != pdPASS)
+		{
+			printf("cannot Read Queue\n");
+		}
+		else if(xReceiverStructure.eDataID== eMotorSpeed)//确定数据源本质上就是个判断语句，判断出数据结构体内的数据源ID是否是自己定义的
+		{
+			printf("read MotorSpeed is %d \n", xReceiverStructure.LDataValue);
+		}
+		else if (xReceiverStructure.eDataID == eSpeedSetPoint)
+		{
+			printf("read eSpeedSetPoint is %d \n", xReceiverStructure.LDataValue);
+		}
+	}
+}
+ 
+图表 47 运行结果
+5.5 传输大块数据(队列传递地址)
+
+队列传递地址的过程可以简化为:
+1)	发送端定义一个缓存来存放要发送的数据（地址）
+2)	将发送端的缓存的地址传入队列，在队列中会使用memcpy函数拷贝地址中的内容，所以要传入地址
+3)	在接收端定义一个缓冲来存放要接受的数据(地址),在接收函数中也会使用memcpy拷贝数据，所以要传入接收数据的缓存的地址。
+4)	总的来说是发送端提供一个存放数据的缓冲区的地址给队列，队列用memcpy将这个地址内的数据拷贝进来，接收端也提供一个存放数据的缓冲区的地址给队列，队列使用memcpy将数据拷贝进这个缓冲区。总共要定义两个变量当作缓冲区，然后把它们的地址给队列。
+FreeRtos的队列使用拷贝传输，如果要传输的数据太大，不建议直接拷贝数据进队列，这时将数据的首地址放入队列更容易操作。
+要求这块数据的存放地点在全局区或者动态分配的内存区，目的是保持这块内存的可用性，并且内存的所有者、操作者都能访问这块内存。
+
+#include "FreeRTOS.h"
+#include "task.h"
+#include "queue.h"
+#include "stdio.h"
+#define mainDELAY_LOOP_COUNT		( 0xffffff )
+
+
+QueueHandle_t xQueue;
+void vSenderTask(void* pvParameter);
+void vReceiveTask(void* pvParameter);
+
+char pcBuffer[100];//在全局区定义了一个大的空间
+
+int main( void )
+{
+	//创建一个队列，长度为1，大小为char*，用来存放地址
+	xQueue = xQueueCreate(1,sizeof(char*));
+
+	if (xQueue != NULL)
+	{
+		xQueueReset(xQueue);
+		xTaskCreate((TaskFunction_t)vSenderTask	,
+									"Sender1"	,
+									1000		,
+									NULL,
+									1			,
+									NULL);
+		//创建一个接收队列的任务，他的优先级为2，一旦队列中有数据可读就运行，没数据可读就会阻塞
+		xTaskCreate((TaskFunction_t)vReceiveTask,
+									"Receiver"	,
+									1000		,
+									NULL		,
+									2			,
+									NULL);
+	}
+	vTaskStartScheduler();	
+	for( ;; );
+	return 0;
+}
+/*-----------------------------------------------------------*/
+
+void vSenderTask(void* pvParameter)
+{
+
+	BaseType_t	xStatus;
+	char* buffer;
+	int cnt=0;
+	while (1)
+	{	
+		sprintf(pcBuffer, "写队列的次数是:%d\n",cnt++);
+		buffer = pcBuffer;//xQueueSendToBack函数需要传入指针变量，原因是这个函数内部的拷贝过程是用memcpy实现的，所以要传入地址，同时还要用另一个变量来暂存pcBuffer的地址。
+		xStatus = xQueueSendToBack(xQueue, &buffer, 0);//写入的是buffer的地址，在函数内部会用memcpy拷贝这个地址中的内容，也就是pcBuffer的首地址
+		if (xStatus != pdPASS)
+		{
+			printf("cannot write Queue\n");
+		}
+	}
+}
+void vReceiveTask(void* pvParameter)
+{
+
+	BaseType_t	xStatus;
+	char* buffer;
+	while (1)
+	{	//从头部读取队列，读取xQueue队列，读取的值的指针为&xReceiverStructure，不阻塞
+		xStatus = xQueueReceive(xQueue, &buffer, 100);//将队列中的地址放入buffer的地址中，本质上是将队列中的数据通过memcpy拷贝到新的地址处，所以要传入接收数据的地址。
+		if (xStatus != pdPASS)
+		{
+			printf("cannot Read Queue\n");
+		}
+		else 
+		{
+			printf("%s \n", buffer);
+		}
+
+	}
+}
+
+5.6 邮箱Mailbox
+FreeRtos中的邮箱是一个队列，队列的长度只有1
+写邮箱:新数据覆盖旧数据，在任务中调用xQueueOverwrtie()，在中断中使用xQueueOverwriteFromISR()。无论邮箱中是否有数据这些数据总能写入成功。
+读邮箱：读数据时，数据不会被移除；在任务中使用xQueuePeek(),在中断中使用xQueuePeekFromISR()。第一次读取时可能因为无数据而阻塞，一旦曾经写入数据，以后读邮箱时总能成功。
+QueueHandle_t xQueue;
+void vSenderTask(void* pvParameter);
+void vReceiveTask(void* pvParameter);
+
+
+int main( void )
+{
+	xQueue = xQueueCreate(1,sizeof(char));
+
+	if (xQueue != NULL)
+	{
+		xQueueReset(xQueue);
+		xTaskCreate((TaskFunction_t)vSenderTask	,
+									"Sender1"	,
+									1000		,
+									NULL,
+									2			,
+									NULL);
+		xTaskCreate((TaskFunction_t)vReceiveTask,
+									"Receiver"	,
+									1000		,
+									NULL		,
+									1			,
+									NULL);
+	}
+	vTaskStartScheduler();	
+	for( ;; );
+	return 0;
+}
+/*-----------------------------------------------------------*/
+
+void vSenderTask(void* pvParameter)
+{
+
+	BaseType_t	xStatus;
+	char buffer='A';
+	while (1)
+	{	
+		xStatus = xQueueOverwrite(xQueue, &buffer); //队列覆盖函数，写入’A’
+		if (xStatus != pdPASS)
+		{
+			printf("cannot write Queue\n");
+		}
+		vTaskDelay(1);//阻塞让任务二有机会运行
+	}
+}
+void vReceiveTask(void* pvParameter)
+{
+
+	BaseType_t	xStatus;
+	char buffer;
+
+	while (1)
+	{	
+		xStatus = xQueuePeek(xQueue, &buffer, 0);//窥视队列，不会删除队列中的值
+		if (xStatus != pdPASS)
+		{
+			printf("cannot Read Queue\n");
+		}
+		else 
+		{
+			printf("%c \n", buffer);
+		}
+
+	}
+}
