@@ -1,0 +1,311 @@
+6 信号量
+6.1 信号量的特性
+6.1.1 信号量的常规操作
+信号量是一种实现任务之间同步与互斥 的机制，可以实现任务与任务之间、中断与任务之间同步，或者临界资源的互斥访问。他是一个非负整数，所有获取它的任务都会将该整数减一，当该整数值为零时，说有获取它的任务都将处于阻塞状态。
+
+信号：起通知作用
+量：表示资源的数量
+当‘量’没有限制时他就是‘计数型信号量’
+当‘量’只有1和0时，他就是‘二进制信号量’
+give 给出资源，计数值加一。take 获得资源，计数值减一
+give是释放，take是获取，释放不会被阻塞，获取会被阻塞
+
+ 
+图表 48 信号量使用示意图
+6.1.2 信号量和队列对比
+信号量只有计数值，无法容纳其他数据，创建信号量时只需要分配信号量结构体。
+give信号量时如果计数值达到最大值会返回失败，但是不会阻塞，take获取信号量时如果信号量内无资源，则会被阻塞。
+6.1.3 计数型信号量与二进制信号量对比
+信号量的计数值有限制，当信号量的计数值最大值设置为1时这个信号量就是二进制信号量，如果最大值不是1那他就是计数型信号量。
+
+二进制信号量初始值为0，计数型信号量初始值可设置。
+6.2 信号量函数
+使用信号量时要先创建信号量，然后添加或者获取资源，在此过程中用句柄来表示信号量。
+6.2.1 创建
+使用信号量之间要先创建，得到一个句柄，操作信号量时通过这个句柄找到具体使用哪个信号量，二进制信号量与计数型信号量他们的创建函数不一样。
+
+SemaphoreHandle_t xSemaphoreCreateBinary(void);//动态创建一个二值信号量，返回这个信号量的句柄，如果创建失败返回NULL，函数内部会自动分配内存给信号量结构体
+
+SemaphoreHandle_t xSemaphoreCreateBinaryStatic(
+StaticSemaphore_t* pxSemaphoreBuffer);
+//静态创建二进制信号量，需要手动分配内存给信号量结构体StaticSemaphore_t
+
+SemaphoreHandle_t xSemaphoreCreateCounting(UBaseType_t uxMaxCount,UBaseType_t uxInitialCount);//动态创建一个计数型信号量并返回他的句柄，失败返回NULL。uxMaxCount是最大计数值，uxInitialCount是初始计数值。
+
+SemaphoreHandle_t xSemaphoreCreateCountingStatic(//静态创建计数型信号量
+UBaseType_t uxMaxCount,//最大计数值
+UBaseType_t uxInitialCount,//初始计数值
+StaticSemaphore_t* pxSemaphoreBuffer);//StaticSemaphore_t结构体指针
+
+6.2.2 删除
+对于动态创建的信号量，不再需要他们时可以删除他们以回收内存
+vSemphoreDelete可以用来删除二进制信号量、计数型信号量
+void vSemaphoreDelete(SemaphoreHandle_t xSemaphore);//传入参数是信号量句柄
+
+6.2.3 give/take
+二进制信号量、计数型信号量的give、take操作函数是一样的。任务和中断使用的函数不同。
+
+BaseType_t xSemaphoreGive(SemaphoreHandle_t xSemphpre);//返回值为pdTure时表示give成功，当二进制信号量计数值为1或者计数型信号量计数值为最大值时返回失败
+
+BaseType_t xSemaphoreGiveFromISR(
+SemaphoreHandle_t xSemaphore,
+BaseType_t* pxHigherPriorityTaskWoken);//如果释放信号量导致更高优先级的任务变成了就绪态这个返回值就为pdTure
+
+
+BaseType_t xSemaphoreTake(
+						SemaphoreHandle_t xSemaphore,//信号量句柄
+						TickType_t		xTicksToWait);//如果无法获得信号量就会阻塞xTicksToWait这么长时间，如果这个参数为portMAX_DELAY则表示阻塞一直到获取成功。
+
+BaseType_t xSemaphoreTakeFromISR(
+                        SemaphoreHandle_t xSemaphore,//信号量句柄
+                        BaseType_t *pxHigherPriorityTaskWoken//释放信号量时如果唤醒了更高优先级的任务，这个参数会接受pdTure的返回值
+                    );
+6.3 使用二进制信号量来同步
+SemaphoreHandle_t xBinarySemaphore;//信号量句柄
+void vSenderTask(void* pvParameter);
+void vReceiveTask(void* pvParameter);
+
+
+int main( void )
+{
+	xBinarySemaphore = xSemaphoreCreateBinary();
+
+	if (xBinarySemaphore != NULL)
+	{
+		xTaskCreate((TaskFunction_t)vSenderTask	,
+									"Sender1"	,
+									1000		,
+									NULL,
+									2			,
+									NULL);
+		xTaskCreate((TaskFunction_t)vReceiveTask,
+									"Receiver"	,
+									1000		,
+									NULL		,
+									1			,
+									NULL);
+	}
+	vTaskStartScheduler();	
+	for( ;; );
+	return 0;
+}
+/*-----------------------------------------------------------*/
+
+void vSenderTask(void* pvParameter)
+{
+
+	BaseType_t	xStatus;
+	int i;
+	int success = 1;
+	int fail = 1;
+	while (1)
+	{	
+		for (i = 0; i < 3; i++)//释放三次信号量
+		{
+			xStatus = xSemaphoreGive(xBinarySemaphore);
+			if (xStatus != pdPASS)
+			{//释放第一次后信号量就满了，所以后面两次会失败，但是释放操作不会被阻塞，会将三次释放都执行完
+				printf("fail give %d times\n", fail++);
+			}
+			else
+				printf("give binary %d times sucess\n", success++);
+		}
+		vTaskDelay(10);//执行完释放操作后阻塞自己10ms，这个时候任务二会执行
+	}
+}
+void vReceiveTask(void* pvParameter)
+{
+
+	BaseType_t	xStatus;
+	int success = 1;
+	int fail = 1;
+	while (1)
+	{	//任务一阻塞后任务二开始运行，开始获取信号量，第一次获取或成功，获取成功后信号量内无值，所以之后会失败从而阻塞自己。
+		xStatus = xSemaphoreTake(xBinarySemaphore,portMAX_DELAY);//如果获取不到信号量就一直阻塞
+		if (xStatus != pdPASS)
+		{
+			printf("fail get %d times\n", fail++);
+		}
+		else
+			printf("get binary %d times sucess\n", success++);
+	}
+}
+ 
+图表 49 二值信号量的同步
+同步是任务之间按照某种规则进行协调和按序执行的过程，其实是等待上一个任务完成的过程，在实际应用中任务可能会在访问资源的过程中被打断，这样可能会造成错误，所以需要同步操作。利用二值信号量这种一发一收的方法可以实现同步。
+6.4 防止数据丢失 
+如果一个任务连续释放多次信号量，但是接受任务中只能接收到一次信号量，这样就会造成信息的丢失，为了避免这种情况可以选择先将数据放入缓冲区储存起来，然后接受任务获取信号量后直接取出所有数据。
+#include "FreeRTOS.h"
+#include "task.h"
+#include "semphr.h"
+#include "stdio.h"
+#define mainDELAY_LOOP_COUNT		( 0xffffff )
+
+
+SemaphoreHandle_t xBinarySemaphore;
+void vSenderTask(void* pvParameter);
+void vReceiveTask(void* pvParameter);
+int buff[3] = { 0 };//数据缓存buff
+
+int main( void )
+{
+	xBinarySemaphore = xSemaphoreCreateBinary();
+
+	if (xBinarySemaphore != NULL)
+	{
+		xTaskCreate((TaskFunction_t)vSenderTask	,
+									"Sender1"	,
+									1000		,
+									NULL,
+									2			,
+									NULL);
+		xTaskCreate((TaskFunction_t)vReceiveTask,
+									"Receiver"	,
+									1000		,
+									NULL		,
+									1			,
+									NULL);
+	}
+	vTaskStartScheduler();	
+	for( ;; );
+	return 0;
+}
+/*-----------------------------------------------------------*/
+
+void vSenderTask(void* pvParameter)
+{
+
+	BaseType_t	xStatus;
+	int i;
+	int success = 1;
+	int fail = 1;
+	while (1)
+	{	
+		for (i = 0; i < 3; i++)
+		{	
+			buff[i] = i+1;//将每次要发送的数据都放入缓冲区，防止丢失
+			xStatus = xSemaphoreGive(xBinarySemaphore);
+			if (xStatus != pdPASS)
+			{
+				printf("fail give %d times\n", fail++);
+			}
+			else
+				printf("give binary %d times sucess\n", success++);
+		}
+		vTaskDelay(10);//释放三次后进入阻塞
+	}
+}
+void vReceiveTask(void* pvParameter)
+{
+
+	BaseType_t	xStatus;
+	int success = 1;
+	int fail = 1;
+	while (1)
+	{	
+		xStatus = xSemaphoreTake(xBinarySemaphore,portMAX_DELAY);//如果获取不到信号量就一直阻塞
+		for (int i = 0; i < 3; i++)//任务一阻塞后任务二获取到信号量，虽然任务一发送了三次信号量，但是只有一次有效，任务二也只能获取成功一次，在获取成功后直接取出缓冲区内的所有数据
+		{
+			printf("%d ", buff[i]);
+		}
+		puts("");
+		if (xStatus != pdPASS)
+		{
+			printf("fail get %d times\n", fail++);
+		}
+		else
+			printf("get binary %d times sucess\n", success++);
+	}
+}
+
+ 
+图表 50 防止数据丢失
+6.5 使用计数型信号量
+使用计数型信号量时可以多次释放或者获取信号量。当信号量的计数值达到最大值时，再次释放信号量会出错。如果信号量计数值为0，接受任务就可以连续n次获取信号量，当获取第n+1次时会阻塞或失败。
+
+#include "FreeRTOS.h"
+#include "task.h"
+#include "semphr.h"
+#include "stdio.h"
+#define mainDELAY_LOOP_COUNT		( 0xffffff )
+
+
+SemaphoreHandle_t xCountingSemaphore;//计数型信号量句柄
+void vSenderTask(void* pvParameter);
+void vReceiveTask(void* pvParameter);
+int buff[4] = { 0 };
+
+int main( void )
+{
+	xCountingSemaphore = xSemaphoreCreateCounting(3,0);//创建了一个计数型信号量，信号量中可以计数三个信号量。
+
+	if (xCountingSemaphore != NULL)
+	{
+		xTaskCreate((TaskFunction_t)vSenderTask	,
+									"Sender1"	,
+									1000		,
+									NULL,
+									2			,
+									NULL);
+		xTaskCreate((TaskFunction_t)vReceiveTask,
+									"Receiver"	,
+									1000		,
+									NULL		,
+									1			,
+									NULL);
+	}
+	vTaskStartScheduler();	
+	for( ;; );
+	return 0;
+}
+/*-----------------------------------------------------------*/
+
+void vSenderTask(void* pvParameter)
+{
+
+	BaseType_t	xStatus;
+	int i;
+	int success = 1;
+	int fail = 1;
+	while (1)
+	{	
+		for (i = 0; i < 4; i++)
+		{	
+			buff[i] = i+1;
+			xStatus = xSemaphoreGive(xCountingSemaphore);
+//向计数型信号量中释放四次信号量，前三次会成功，第四次会失败，失败时不会阻塞
+			if (xStatus != pdPASS)
+			{
+				printf("fail give %d times\n", fail++);
+			}
+			else
+				printf("give binary %d times sucess\n", success++);
+		}
+		vTaskDelay(10);
+	}
+}
+void vReceiveTask(void* pvParameter)
+{
+
+	BaseType_t	xStatus;
+	int success = 1;
+	int fail = 1;
+	while (1)
+	{	
+		xStatus = xSemaphoreTake(xCountingSemaphore,portMAX_DELAY);//如果获取不到信号量就一直阻塞
+		//接收任务会获取信号量，第一次获取会成功然后执行下面的语句，然后循环回来获取第二次，这次也会成功，反复执行后直到第四次获取信号量，由于信号量内已经没有值，所以会被阻塞，不会运行下面的语句。
+		for (int i = 0; i < 4; i++)
+		{
+			printf("%d ", buff[i]);
+		}
+		puts("");
+		if (xStatus != pdPASS)
+		{
+			printf("fail get %d times\n", fail++);
+		}
+		else
+			printf("get binary %d times sucess\n", success++);
+	}
+}
+ 
+图表 51 计数信号量防止数据丢失
