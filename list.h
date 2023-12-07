@@ -35,3 +35,12 @@ typedef struct xLIST
 
 //根结点初始化
 void vListInitialise(List_t * const pxlist);
+
+//将结点插入到链表尾部
+void vListInsertEnd(List_t* const pxList , ListItem_t* const pxNewListItem);
+
+//结点按照升序插入到链表中间
+void vListInsert(List_t* const pxList, ListItem_t* const pxNewListItem);
+
+//将结点从链表中删除
+UBaseType_t vListRemobe(ListItem_t* const pxItemToRemove);
